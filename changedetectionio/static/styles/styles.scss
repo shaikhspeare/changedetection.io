@@ -35,16 +35,21 @@ a.github-link {
 
 section.content {
   padding-top: 5em;
-  padding-bottom: 5em;
+  padding-bottom: 1em;
   flex-direction: column;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
+code {
+  background: #eee;
+}
+
 /* table related */
 .watch-table {
   width: 100%;
+  font-size: 80%;
 
   tr.unviewed {
     font-weight: bold;
@@ -55,7 +60,6 @@ section.content {
   }
 
   td {
-    font-size: 80%;
     white-space: nowrap;
   }
 
@@ -107,12 +111,12 @@ section.content {
 
 body:after {
   content: "";
-  background: linear-gradient(130deg, #ff7a18, #af002d 41.07%, #319197 76.05%)
+  background: linear-gradient(130deg, #5ad8f7, #2f50af 41.07%, #9150bf 84.05%);
 }
 
 body:after, body:before {
   display: block;
-  height: 600px;
+  height: 650px;
   position: absolute;
   top: 0;
   left: 0;
@@ -125,11 +129,8 @@ body::after {
 }
 
 body::before {
+  // background-image set in base.html so it works with reverse proxies etc
   content: "";
-  background-image: url(/static/images/gradient-border.png);
-}
-
-body:before {
   background-size: cover
 }
 
@@ -240,10 +241,16 @@ body:after, body:before {
 
 #notification-customisation {
     border: 1px solid #ccc;
-    padding: 1rem;
+    padding: 0.5rem;
     border-radius: 5px;
 }
 
+#notification-error-log {
+    border: 1px solid #ccc;
+    padding: 1rem;
+    border-radius: 5px;
+    overflow-wrap: break-word;
+}
 
 #token-table {
     &.pure-table td, &.pure-table th {
@@ -265,6 +272,7 @@ body:after, body:before {
   }
   legend {
     color: #fff;
+    font-weight: bold;
   }
 }
 
@@ -317,12 +325,10 @@ footer {
     */
 }
 
-
-
 .sticky-tab {
   position: absolute;
-  top: 80px;
-  font-size: 8px;
+  top: 60px;
+  font-size: 65%;
   background: #fff;
   padding: 10px;
   &#left-sticky {
@@ -330,6 +336,11 @@ footer {
   }
   &#right-sticky {
     right: 0px;
+  }
+  &#hosted-sticky {
+    right: 0px;
+    top: 100px;
+    font-weight: bold;
   }
 }
 
@@ -363,6 +374,15 @@ footer {
         padding-bottom: 1em;
         div {
             margin: 0px;
+        }
+        .checkbox {
+            > * {
+              display: inline;
+              vertical-align: middle;
+            }
+            > label {
+               padding-left: 5px;
+            }
         }
     }
   /* The input fields with errors */
@@ -417,18 +437,35 @@ footer {
   }
 }
 
+
+
+@media only screen and (max-width: 760px), (min-device-width: 768px) and (max-device-width: 800px) {
+
+  div.sticky-tab#hosted-sticky {
+    top: 60px;
+    left: 0px;
+    right: auto;
+  }
+
+  section.content {
+    padding-top: 110px;
+  }
+
+  // Make the tabs easier to hit, they will be all nice and horizontal
+  div.tabs.collapsable ul li {
+    display: block;
+    border-radius: 0px;
+  }
+
+  input[type='text'] {
+    width: 100%;
+  }
+
 /*
 Max width before this PARTICULAR table gets nasty
 This query will take effect for any screen smaller than 760px
 and also iPads specifically.
 */
-
-@media only screen and (max-width: 760px), (min-device-width: 768px) and (max-device-width: 1024px) {
-
-  input[type='text'] {
-    width: 100%;
-  }
-    
   .watch-table {
     /* Force table to not be like tables anymore */
     thead, tbody, th, td, tr {
@@ -542,9 +579,16 @@ $form-edge-padding: 20px;
     display: block;
   }
 }
-.edit-form {
-  min-width: 70%;
-  .tab-pane-inner {
+
+.login-form {
+  .inner {
+    background: #fff;;
+    padding: $form-edge-padding;
+    border-radius: 5px;
+  }
+}
+
+.tab-pane-inner {
     &:not(:target) {
         display: none;
     }
@@ -553,7 +597,12 @@ $form-edge-padding: 20px;
     }
     // doesnt need padding because theres another row of buttons/activity
     padding: 0px;
-  }
+}
+
+.edit-form {
+  min-width: 70%;
+  /* so it cant overflow */
+  max-width: 95%;
   .box-wrap {
     position: relative;
   }
@@ -565,5 +614,14 @@ $form-edge-padding: 20px;
     display: block;
     background: #fff;
   }
+
+  .pure-form-message-inline {
+    padding-left: 0;
+  }
 }
 
+ul {
+    padding-left: 1em;
+    padding-top: 0px;
+    margin-top: 4px;
+}

@@ -38,20 +38,18 @@ class update_worker(threading.Thread):
 
                     changed_detected = False
                     contents = ""
+                    screenshot = False
                     update_obj= {}
                     now = time.time()
 
                     try:
-
-                        changed_detected, update_obj, contents = update_handler.run(uuid)
+                        changed_detected, update_obj, contents, screenshot = update_handler.run(uuid)
 
                         # Re #342
                         # In Python 3, all strings are sequences of Unicode characters. There is a bytes type that holds raw bytes.
                         # We then convert/.decode('utf-8') for the notification etc
                         if not isinstance(contents, (bytes, bytearray)):
                             raise Exception("Error - returned data from the fetch handler SHOULD be bytes")
-
-
                     except PermissionError as e:
                         self.app.logger.error("File permission error updating", uuid, str(e))
                     except content_fetcher.EmptyReply as e:
@@ -60,7 +58,7 @@ class update_worker(threading.Thread):
                         self.datastore.update_watch(uuid=uuid, update_obj={'last_error': err_text,
                                                                            'last_check_status': e.status_code})
                     except Exception as e:
-                        self.app.logger.error("Exception reached processing watch UUID:%s - %s", uuid, str(e))
+                        self.app.logger.error("Exception reached processing watch UUID: %s - %s", uuid, str(e))
                         self.datastore.update_watch(uuid=uuid, update_obj={'last_error': str(e)})
 
                     else:
@@ -127,8 +125,8 @@ class update_worker(threading.Thread):
                                             'watch_url': watch['url'],
                                             'uuid': uuid,
                                             'current_snapshot': contents.decode('utf-8'),
-                                            'diff_full': diff.render_diff(prev_fname, fname, line_feed_sep=line_feed_sep),
-                                            'diff': diff.render_diff(prev_fname, fname, True, line_feed_sep=line_feed_sep)
+                                            'diff': diff.render_diff(prev_fname, fname, line_feed_sep=line_feed_sep),
+                                            'diff_full': diff.render_diff(prev_fname, fname, True, line_feed_sep=line_feed_sep)
                                         })
 
                                         self.notification_q.put(n_object)
@@ -136,13 +134,21 @@ class update_worker(threading.Thread):
                         except Exception as e:
                             # Catch everything possible here, so that if a worker crashes, we don't lose it until restart!
                             print("!!!! Exception in update_worker !!!\n", e)
+                            self.app.logger.error("Exception reached processing watch UUID: %s - %s", uuid, str(e))
+                            self.datastore.update_watch(uuid=uuid, update_obj={'last_error': str(e)})
 
                     finally:
                         # Always record that we atleast tried
                         self.datastore.update_watch(uuid=uuid, update_obj={'fetch_time': round(time.time() - now, 3),
                                                                            'last_checked': round(time.time())})
+                        # Always save the screenshot if it's available
+                        if screenshot:
+                            self.datastore.save_screenshot(watch_uuid=uuid, screenshot=screenshot)
 
                 self.current_uuid = None  # Done
                 self.q.task_done()
+
+                # Give the CPU time to interrupt
+                time.sleep(0.1)
 
             self.app.config.exit.wait(1)

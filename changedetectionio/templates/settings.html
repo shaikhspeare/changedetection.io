@@ -1,14 +1,20 @@
 {% extends 'base.html' %}
 
 {% block content %}
-{% from '_helpers.jinja' import render_field %}
+{% from '_helpers.jinja' import render_field, render_checkbox_field, render_button %}
 {% from '_common_fields.jinja' import render_common_settings_form %}
-
+<script>
+    const notification_base_url="{{url_for('ajax_callback_send_notification_test')}}";
+{% if emailprefix %}
+    const email_notification_prefix=JSON.parse('{{emailprefix|tojson}}');
+{% endif %}
+</script>
 <script type="text/javascript" src="{{url_for('static_content', group='js', filename='settings.js')}}" defer></script>
 <script type="text/javascript" src="{{url_for('static_content', group='js', filename='tabs.js')}}" defer></script>
+<script type="text/javascript" src="{{url_for('static_content', group='js', filename='notifications.js')}}" defer></script>
 
 <div class="edit-form">
-    <div class="tabs">
+    <div class="tabs collapsable">
         <ul>
             <li class="tab" id="default-tab"><a href="#general">General</a></li>
             <li class="tab"><a href="#notifications">Notifications</a></li>
@@ -18,6 +24,7 @@
     </div>
     <div class="box-wrap inner">
         <form class="pure-form pure-form-stacked settings" action="{{url_for('settings_page')}}" method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
             <div class="tab-pane-inner" id="general">
                 <fieldset>
                     <div class="pure-control-group">
@@ -25,12 +32,15 @@
                         <span class="pure-form-message-inline">Default time for all watches, when the watch does not have a specific time setting.</span>
                     </div>
                     <div class="pure-control-group">
-                        {% if current_user.is_authenticated %}
-                        <a href="{{url_for('settings_page', removepassword='yes')}}"
-                           class="pure-button pure-button-primary">Remove password</a>
+                        {% if not hide_remove_pass %}
+                            {% if current_user.is_authenticated %}
+                                {{ render_button(form.removepassword_button) }}
+                            {% else %}
+                            {{ render_field(form.password) }}
+                            <span class="pure-form-message-inline">Password protection for your changedetection.io application.</span>
+                            {% endif %}
                         {% else %}
-                        {{ render_field(form.password) }}
-                        <span class="pure-form-message-inline">Password protection for your changedetection.io application.</span>
+                            <span class="pure-form-message-inline">Password is locked.</span>
                         {% endif %}
                     </div>
                     <div class="pure-control-group">
@@ -43,16 +53,22 @@
                     </div>
 
                     <div class="pure-control-group">
-                        {{ render_field(form.extract_title_as_title) }}
+                        {{ render_checkbox_field(form.extract_title_as_title) }}
                         <span class="pure-form-message-inline">Note: This will automatically apply to all existing watches.</span>
                     </div>
+
+                    <div class="pure-control-group">
+                        {{ render_checkbox_field(form.real_browser_save_screenshot) }}
+                        <span class="pure-form-message-inline">When using a Chrome browser, a screenshot from the last check will be available on the Diff page</span>
+                    </div>
+
                 </fieldset>
             </div>
 
             <div class="tab-pane-inner" id="notifications">
                 <fieldset>
                     <div class="field-group">
-                        {{ render_common_settings_form(form, current_base_url) }}
+                        {{ render_common_settings_form(form, current_base_url, emailprefix) }}
                     </div>
                 </fieldset>
             </div>
@@ -71,13 +87,30 @@
             <div class="tab-pane-inner" id="filters">
 
                     <fieldset class="pure-group">
-                    {{ render_field(form.ignore_whitespace) }}
+                    {{ render_checkbox_field(form.ignore_whitespace) }}
                     <span class="pure-form-message-inline">Ignore whitespace, tabs and new-lines/line-feeds when considering if a change was detected.<br/>
-                    <i>Note:</i> Changing this will change the status of your existing watches, possibily trigger alerts etc.
+                    <i>Note:</i> Changing this will change the status of your existing watches, possibly trigger alerts etc.
                     </span>
                     </fieldset>
-
-
+                <fieldset class="pure-group">
+                    {{ render_checkbox_field(form.render_anchor_tag_content) }}
+                    <span class="pure-form-message-inline">Render anchor tag content, default disabled, when enabled renders links as <code>(link text)[https://somesite.com]</code>
+                        <br/>
+                    <i>Note:</i> Changing this could affect the content of your existing watches, possibly trigger alerts etc.
+                    </span>
+                    </fieldset>
+                    <fieldset class="pure-group">
+                      {{ render_field(form.global_subtractive_selectors, rows=5, placeholder="header
+footer
+nav
+.stockticker") }}
+                      <span class="pure-form-message-inline">
+                        <ul>
+                          <li> Remove HTML element(s) by CSS selector before text conversion. </li>
+                          <li> Add multiple elements or CSS selectors per line to ignore multiple parts of the HTML. </li>
+                        </ul>
+                      </span>
+                    </fieldset>
                     <fieldset class="pure-group">
                     {{ render_field(form.global_ignore_text, rows=5, placeholder="Some text to ignore in a line
 /some.regex\d{2}/ for case-INsensitive regex
@@ -87,8 +120,9 @@
                         <ul>
                             <li>Note: This is applied globally in addition to the per-watch rules.</li>
                             <li>Each line processed separately, any line matching will be ignored (removed before creating the checksum)</li>
-                            <li>Regular Expression support, wrap the line in forward slash <b>/regex/</b></li>
+                            <li>Regular Expression support, wrap the line in forward slash <code>/regex/</code></li>
                             <li>Changing this will affect the comparison checksum which may trigger an alert</li>
+                            <li>Use the preview/show current tab to see ignores</li>
                         </ul>
                      </span>
                     </fieldset>
@@ -96,11 +130,9 @@
 
             <div id="actions">
                 <div class="pure-control-group">
-                    <button type="submit" class="pure-button pure-button-primary">Save</button>
-                                           <a href="{{url_for('index')}}" class="pure-button button-small button-cancel">Back</a>
-                        <a href="{{url_for('scrub_page')}}" class="pure-button button-small button-cancel">Delete
-                            History
-                            Snapshot Data</a>
+                    {{ render_button(form.save_button) }}
+                    <a href="{{url_for('index')}}" class="pure-button button-small button-cancel">Back</a>
+                    <a href="{{url_for('scrub_page')}}" class="pure-button button-small button-cancel">Delete History Snapshot Data</a>
                 </div>
             </div>
         </form>

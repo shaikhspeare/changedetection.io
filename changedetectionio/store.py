@@ -1,15 +1,19 @@
-from os import unlink, path, mkdir
 import json
-import uuid as uuid_builder
-from threading import Lock
-from copy import deepcopy
-
 import logging
-import time
-import threading
 import os
+import threading
+import time
+import uuid as uuid_builder
+from copy import deepcopy
+from os import mkdir, path, unlink
+from threading import Lock
 
-from changedetectionio.notification import default_notification_format, default_notification_body, default_notification_title
+from changedetectionio.notification import (
+    default_notification_body,
+    default_notification_format,
+    default_notification_title,
+)
+
 
 # Is there an existing library to ensure some data store (JSON etc) is in sync with CRUD methods?
 # Open a github issue if you know something :)
@@ -46,12 +50,15 @@ class ChangeDetectionStore:
                     'extract_title_as_title': False,
                     'fetch_backend': 'html_requests',
                     'global_ignore_text': [], # List of text to ignore when calculating the comparison checksum
+                    'global_subtractive_selectors': [],
                     'ignore_whitespace': False,
+                    'render_anchor_tag_content': False,
                     'notification_urls': [], # Apprise URL list
                     # Custom notification content
-                    'notification_title': None,
-                    'notification_body': None,
-                    'notification_format': None
+                    'notification_title': default_notification_title,
+                    'notification_body': default_notification_body,
+                    'notification_format': default_notification_format,
+                    'real_browser_save_screenshot': True,
                 }
             }
         }
@@ -78,10 +85,11 @@ class ChangeDetectionStore:
             'ignore_text': [], # List of text to ignore when calculating the comparison checksum
             # Custom notification content
             'notification_urls': [], # List of URLs to add to the notification Queue (Usually AppRise)
-            'notification_title': None,
-            'notification_body': None,
-            'notification_format': None,
+            'notification_title': default_notification_title,
+            'notification_body': default_notification_body,
+            'notification_format': default_notification_format,
             'css_filter': "",
+            'subtractive_selectors': [],
             'trigger_text': [],  # List of text or regex to wait for until a change is detected
             'fetch_backend': None,
             'extract_title_as_title': False
@@ -133,7 +141,7 @@ class ChangeDetectionStore:
                 self.add_watch(url='http://www.quotationspage.com/random.php', tag='test')
                 self.add_watch(url='https://news.ycombinator.com/', tag='Tech news')
                 self.add_watch(url='https://www.gov.uk/coronavirus', tag='Covid')
-                self.add_watch(url='https://changedetection.io', tag='Tech news')
+                self.add_watch(url='https://changedetection.io/CHANGELOG.txt')
 
         self.__data['version_tag'] = version_tag
 
@@ -144,8 +152,8 @@ class ChangeDetectionStore:
             unlink(password_reset_lockfile)
 
         if not 'app_guid' in self.__data:
-            import sys
             import os
+            import sys
             if "pytest" in sys.modules or "PYTEST_CURRENT_TEST" in os.environ:
                 self.__data['app_guid'] = "test-" + str(uuid_builder.uuid4())
             else:
@@ -183,10 +191,6 @@ class ChangeDetectionStore:
         self.needs_write = True
 
     def update_watch(self, uuid, update_obj):
-
-        # Skip if 'paused' state
-        if self.__data['watching'][uuid]['paused']:
-            return
 
         with self.lock:
 
@@ -301,10 +305,10 @@ class ChangeDetectionStore:
                 del_timestamps.append(timestamp)
                 changes_removed += 1
 
-                if not limit_timestamp:
-                    self.data['watching'][uuid]['last_checked'] = 0
-                    self.data['watching'][uuid]['last_changed'] = 0
-                    self.data['watching'][uuid]['previous_md5'] = 0
+        if not limit_timestamp:
+            self.data['watching'][uuid]['last_checked'] = 0
+            self.data['watching'][uuid]['last_changed'] = 0
+            self.data['watching'][uuid]['previous_md5'] = ""
 
 
         for timestamp in del_timestamps:
@@ -323,13 +327,13 @@ class ChangeDetectionStore:
                             content = fp.read()
                         self.data['watching'][uuid]['previous_md5'] = hashlib.md5(content).hexdigest()
                     except (FileNotFoundError, IOError):
-                        self.data['watching'][uuid]['previous_md5'] = False
+                        self.data['watching'][uuid]['previous_md5'] = ""
                         pass
 
         self.needs_write = True
         return changes_removed
 
-    def add_watch(self, url, tag, extras=None):
+    def add_watch(self, url, tag="", extras=None):
         if extras is None:
             extras = {}
 
@@ -379,6 +383,22 @@ class ChangeDetectionStore:
 
         return fname
 
+    def get_screenshot(self, watch_uuid):
+        output_path = "{}/{}".format(self.datastore_path, watch_uuid)
+        fname = "{}/last-screenshot.png".format(output_path)
+        if path.isfile(fname):
+            return fname
+
+        return False
+
+    # Save as PNG, PNG is larger but better for doing visual diff in the future
+    def save_screenshot(self, watch_uuid, screenshot: bytes):
+        output_path = "{}/{}".format(self.datastore_path, watch_uuid)
+        fname = "{}/last-screenshot.png".format(output_path)
+        with open(fname, 'wb') as f:
+            f.write(screenshot)
+            f.close()
+
     def sync_to_json(self):
         logging.info("Saving JSON..")
 
@@ -398,12 +418,9 @@ class ChangeDetectionStore:
                 # system was out of memory, out of RAM etc
                 with open(self.json_store_path+".tmp", 'w') as json_file:
                     json.dump(data, json_file, indent=4)
-
+                os.replace(self.json_store_path+".tmp", self.json_store_path)
             except Exception as e:
                 logging.error("Error writing JSON!! (Main JSON file save was skipped) : %s", str(e))
-
-            else:
-                os.rename(self.json_store_path+".tmp", self.json_store_path)
 
             self.needs_write = False
 
@@ -437,6 +454,7 @@ class ChangeDetectionStore:
                 index.append(self.data['watching'][uuid]['history'][str(id)])
 
         import pathlib
+
         # Only in the sub-directories
         for item in pathlib.Path(self.datastore_path).rglob("*/*txt"):
             if not str(item) in index:

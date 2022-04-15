@@ -7,6 +7,13 @@ from . util import set_original_response, set_modified_response, live_server_set
 
 sleep_time_for_fetch_thread = 3
 
+# Basic test to check inscriptus is not adding return line chars, basically works etc
+def test_inscriptus():
+    from inscriptis import get_text
+    html_content="<html><body>test!<br/>ok man</body></html>"
+    stripped_text_from_html = get_text(html_content)
+    assert stripped_text_from_html == 'test!\nok man'
+
 
 def test_check_basic_change_detection_functionality(client, live_server):
     set_original_response()
@@ -18,6 +25,7 @@ def test_check_basic_change_detection_functionality(client, live_server):
         data={"urls": url_for('test_endpoint', _external=True)},
         follow_redirects=True
     )
+
     assert b"1 Imported" in res.data
 
     time.sleep(sleep_time_for_fetch_thread)
@@ -42,6 +50,14 @@ def test_check_basic_change_detection_functionality(client, live_server):
 
     #####################
 
+    # Check HTML conversion detected and workd
+    res = client.get(
+        url_for("preview_page", uuid="first"),
+        follow_redirects=True
+    )
+    # Check this class does not appear (that we didnt see the actual source)
+    assert b'foobar-detection' not in res.data
+
     # Make a change
     set_modified_response()
 
@@ -50,7 +66,7 @@ def test_check_basic_change_detection_functionality(client, live_server):
 
     # Force recheck
     res = client.get(url_for("api_watch_checknow"), follow_redirects=True)
-    assert b'1 watches are rechecking.' in res.data
+    assert b'1 watches are queued for rechecking.' in res.data
 
     time.sleep(sleep_time_for_fetch_thread)
 
@@ -62,6 +78,11 @@ def test_check_basic_change_detection_functionality(client, live_server):
     res = client.get(url_for("rss"))
     expected_url = url_for('test_endpoint', _external=True)
     assert b'<rss' in res.data
+
+    # re #16 should have the diff in here too
+    assert b'(into   ) which has this one new line' in res.data
+    assert b'CDATA' in res.data
+    
     assert expected_url.encode('utf-8') in res.data
 
     # Following the 'diff' link, it should no longer display as 'unviewed' even after we recheck it a few times

@@ -1,10 +1,12 @@
-import os
-import time
 from abc import ABC, abstractmethod
+import chardet
+import os
 from selenium import webdriver
 from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 from selenium.webdriver.common.proxy import Proxy as SeleniumProxy
 from selenium.common.exceptions import WebDriverException
+import requests
+import time
 import urllib3.exceptions
 
 
@@ -20,7 +22,7 @@ class EmptyReply(Exception):
 class Fetcher():
     error = None
     status_code = None
-    content = None # Should always be bytes.
+    content = None
     headers = None
 
     fetcher_description ="No description"
@@ -30,9 +32,23 @@ class Fetcher():
         return self.error
 
     @abstractmethod
-    def run(self, url, timeout, request_headers, request_body, request_method):
+    def run(self,
+            url,
+            timeout,
+            request_headers,
+            request_body,
+            request_method,
+            ignore_status_codes=False):
         # Should set self.error, self.status_code and self.content
         pass
+
+    @abstractmethod
+    def quit(self):
+        return
+
+    @abstractmethod
+    def screenshot(self):
+        return
 
     @abstractmethod
     def get_last_status_code(self):
@@ -97,21 +113,27 @@ class html_webdriver(Fetcher):
         if proxy_args:
             self.proxy = SeleniumProxy(raw=proxy_args)
 
-    def run(self, url, timeout, request_headers, request_body, request_method):
+    def run(self,
+            url,
+            timeout,
+            request_headers,
+            request_body,
+            request_method,
+            ignore_status_codes=False):
 
         # request_body, request_method unused for now, until some magic in the future happens.
 
         # check env for WEBDRIVER_URL
-        driver = webdriver.Remote(
+        self.driver = webdriver.Remote(
             command_executor=self.command_executor,
             desired_capabilities=DesiredCapabilities.CHROME,
             proxy=self.proxy)
 
         try:
-            driver.get(url)
+            self.driver.get(url)
         except WebDriverException as e:
             # Be sure we close the session window
-            driver.quit()
+            self.quit()
             raise
 
         # @todo - how to check this? is it possible?
@@ -120,33 +142,45 @@ class html_webdriver(Fetcher):
         # raise EmptyReply(url=url, status_code=r.status_code)
 
         # @todo - dom wait loaded?
-        time.sleep(5)
-        self.content = driver.page_source
+        time.sleep(int(os.getenv("WEBDRIVER_DELAY_BEFORE_CONTENT_READY", 5)))
+        self.content = self.driver.page_source
         self.headers = {}
 
-        driver.quit()
+    def screenshot(self):
+        return self.driver.get_screenshot_as_png()
 
-
+    # Does the connection to the webdriver work? run a test connection.
     def is_ready(self):
         from selenium import webdriver
         from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
         from selenium.common.exceptions import WebDriverException
 
-        driver = webdriver.Remote(
+        self.driver = webdriver.Remote(
             command_executor=self.command_executor,
             desired_capabilities=DesiredCapabilities.CHROME)
 
         # driver.quit() seems to cause better exceptions
-        driver.quit()
-
+        self.quit()
         return True
+
+    def quit(self):
+        if self.driver:
+            try:
+                self.driver.quit()
+            except Exception as e:
+                print("Exception in chrome shutdown/quit" + str(e))
 
 # "html_requests" is listed as the default fetcher in store.py!
 class html_requests(Fetcher):
     fetcher_description = "Basic fast Plaintext/HTTP Client"
 
-    def run(self, url, timeout, request_headers, request_body, request_method):
-        import requests
+    def run(self,
+            url,
+            timeout,
+            request_headers,
+            request_body,
+            request_method,
+            ignore_status_codes=False):
 
         r = requests.request(method=request_method,
                          data=request_body,
@@ -155,16 +189,21 @@ class html_requests(Fetcher):
                          timeout=timeout,
                          verify=False)
 
-        # https://stackoverflow.com/questions/44203397/python-requests-get-returns-improperly-decoded-text-instead-of-utf-8
-        # Return bytes here
-        html = r.text
+        # If the response did not tell us what encoding format to expect, Then use chardet to override what `requests` thinks.
+        # For example - some sites don't tell us it's utf-8, but return utf-8 content
+        # This seems to not occur when using webdriver/selenium, it seems to detect the text encoding more reliably.
+        # https://github.com/psf/requests/issues/1604 good info about requests encoding detection
+        if not r.headers.get('content-type') or not 'charset=' in r.headers.get('content-type'):
+            encoding = chardet.detect(r.content)['encoding']
+            if encoding:
+                r.encoding = encoding
 
         # @todo test this
         # @todo maybe you really want to test zero-byte return pages?
-        if not r or not html or not len(html):
+        if (not ignore_status_codes and not r) or not r.content or not len(r.content):
             raise EmptyReply(url=url, status_code=r.status_code)
 
         self.status_code = r.status_code
-        self.content = html
+        self.content = r.text
         self.headers = r.headers
 
